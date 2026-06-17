@@ -356,10 +356,6 @@ class Stage2Filter:
         return (z_r > ZSCORE_THRESHOLD or z_v > ZSCORE_THRESHOLD), z_r, z_v
 
 
-# ══════════════════════════════════════════════════════════
-#  ALERT SENDER  (Telegram)
-# ══════════════════════════════════════════════════════════
-
 class AlertSender:
     """Deliversnomaly alert"""
 
@@ -392,8 +388,6 @@ class AlertSender:
         except Exception as exc:
             log.error(f"Alert delivery failed for {candle.symbol}: {exc}")
 
-
-═════════════════════════════════════════════════════
 
 class AlertSystem:
     """Wires all components"""
