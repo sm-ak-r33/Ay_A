@@ -14,7 +14,23 @@ jobs:
       ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      
+        # Saxo trading controls
+      SAXO_TRADING_ENABLED: ${{ secrets.SAXO_TRADING_ENABLED }}
+      SAXO_DRY_RUN: ${{ secrets.SAXO_DRY_RUN }}
+      SAXO_ENV: ${{ secrets.SAXO_ENV }}
+
+  # Saxo authentication
+      SAXO_ACCESS_TOKEN: ${{ secrets.SAXO_ACCESS_TOKEN }}
+      SAXO_ACCOUNT_KEY: ${{ secrets.SAXO_ACCOUNT_KEY }}
+
+  # Saxo order sizing and risk settings
+      SAXO_ORDER_BUDGET_DKK: ${{ secrets.SAXO_ORDER_BUDGET_DKK }}
+      SAXO_TAKE_PROFIT_PCT: ${{ secrets.SAXO_TAKE_PROFIT_PCT }}
+      SAXO_TRAILING_STOP_PCT: ${{ secrets.SAXO_TRAILING_STOP_PCT }}
+      SAXO_TRAILING_STEP_PCT: ${{ secrets.SAXO_TRAILING_STEP_PCT }}
+
+  # Saxo symbol mapping
+      SAXO_SYMBOL_MAP_JSON: ${{ secrets.SAXO_SYMBOL_MAP_JSON }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
