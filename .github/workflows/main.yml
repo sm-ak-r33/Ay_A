@@ -45,4 +45,4 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run Python script
-        run: python saxo_trader.py
+        run: python alert_system_integration_snippet.py
