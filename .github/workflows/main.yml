@@ -1,17 +1,21 @@
-name: x
+name: Run Testing System
+
 on:
+  repository_dispatch:
+    types: [cron_trigger]
   workflow_dispatch:
+
 jobs:
-  a:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+
     env:
       ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
       ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+
       STREAM_ALL: ${{ secrets.STREAM_ALL }}
       WATCHLIST: ${{ secrets.WATCHLIST }}
       CANDLE_INTERVAL: ${{ secrets.CANDLE_INTERVAL }}
@@ -29,17 +33,24 @@ jobs:
       PENNY_STOCK_USD: ${{ secrets.PENNY_STOCK_USD }}
       COOLDOWN_MINUTES: ${{ secrets.COOLDOWN_MINUTES }}
       USD_DKK_RATE: ${{ secrets.USD_DKK_RATE }}
-      USD_DKK_FALLBACK: ${{ secrets.USD_DKK_FALLBACK }}
+
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       GOOGLE_WORKSHEET: ${{ secrets.GOOGLE_WORKSHEET }}
       GOOGLE_TRADES_WORKSHEET: ${{ secrets.GOOGLE_TRADES_WORKSHEET }}
       GOOGLE_SUMMARY_WORKSHEET: ${{ secrets.GOOGLE_SUMMARY_WORKSHEET }}
-      GOOGLE_EVENT_COLUMNS: ${{ secrets.GOOGLE_EVENT_COLUMNS }}
-      GOOGLE_TRADE_COLUMNS: ${{ secrets.GOOGLE_TRADE_COLUMNS }}
-      GOOGLE_SUMMARY_COLUMNS: ${{ secrets.GOOGLE_SUMMARY_COLUMNS }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - run: python q.py
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run system
+        run: python q.py
