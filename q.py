@@ -324,8 +324,8 @@ class D1:
                     "price_usd": p,
                     "z_range": a2,
                     "z_volume": a3,
-                    "quarantine_rate_per_min": r
-                    "reason": "V" if a3 > a2 else "R"
+                    "quarantine_rate_per_min": r,
+                    "reason": "V" if a3 > a2 else "R",
                     "status": "QUARANTINED"
                     })
                 self.a.q(y)
