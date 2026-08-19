@@ -309,15 +309,26 @@ class D1:
             if v is None or not self.k(y, v):
                 self.a.q(y)
                 return
-            a1, a2 = self.l(y, v)
+            a1, a2, a3 = self.l(y, v)
             if not a1:
                 self.a.q(y)
                 return
-            r = math.log(y.close / y.open) / I if y.open > 0 and y.close > 0 else 0.0
-            self.g[s] = A3(s, t, p, r, a2, a1, [p], [t])
-            self.c.r(s)
-            self.e.q({"timestamp": t.isoformat(), "symbol": s, "event": "Q", "price_usd": p, "z_range": a2, "z_volume": a1, "quarantine_rate_per_min": r, "reason": "V" if a1 > a2 else "R", "status": "QUARANTINED"})
-            self.a.q(y)
+                r = math.log(y.close / y.open) / I if y.open > 0 and y.close > 0 else 0.0
+                self.g[s] = A3(s, t, p, r, a2, a3, [p], [t])
+                self.c.r(s)
+                self.e.q({
+                    "timestamp": t.isoformat(),
+
+                    "symbol": s,
+                    "event": "Q",
+                    "price_usd": p,
+                    "z_range": a2,
+                    "z_volume": a3,
+                    "quarantine_rate_per_min": r
+                    "reason": "V" if a3 > a2 else "R"
+                    "status": "QUARANTINED"
+                    })
+                self.a.q(y)
     def s(self, s, p, t):
         q = self.g.get(s)
         if q is None:
