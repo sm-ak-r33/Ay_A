@@ -69,6 +69,10 @@ P = c("BOOTSTRAP_BATCH", 200)
 Q = d("BOOTSTRAP_PAUSE", 0.4)
 R = c("QUARANTINE_MINUTES", 2)
 U = d("QUARANTINE_RATE_TOLERANCE", 0.25)
+Y1 = d("MIN_TWO_MIN_RETURN", 0.005)
+Y2 = d("MAX_QUARANTINE_PULLBACK", 0.0025)
+Y3 = c("SELL_CONFIRM_MINUTES", 2)
+Y4 = d("MAX_SELL_PULLBACK", 0.003)
 V = c("HOLD_MINUTES", 5)
 X = d("BUDGET_DKK", 500)
 Y = d("PENNY_STOCK_USD", 1)
@@ -144,6 +148,8 @@ class A3:
     latest_price: Optional[float] = None
     latest_time: Optional[datetime] = None
     ignore_reason: Optional[str] = None
+    sell_checks: int = 0
+    growths: list[float] = field(default_factory=list)
     alert_volume: float = 0.0
 
 
@@ -488,44 +494,124 @@ class D1:
 
     def s(self, s, p, t):
         q = self.g.get(s)
+
         if q is None:
             return
+
         q.latest_price = p
         q.latest_time = t
+
         if q.status == "BOUGHT":
-            if q.buy_time and t >= q.buy_time + timedelta(minutes=V):
-                self.x(q, p, t)
+            if not q.times or t > q.times[-1]:
+                if q.prices and q.prices[-1] > 0 and p > 0:
+                    q.growths.append(math.log(p / q.prices[-1]))
+                q.prices.append(p)
+                q.times.append(t)
+
+            if q.buy_time and t > q.buy_time and q.growths:
+                g = q.growths[-1]
+                if g <= -Y4:
+                    q.sell_checks += 1
+                else:
+                    q.sell_checks = 0
+
+                self.e.q(
+                    "INFO",
+                    s,
+                    "HOLD",
+                    f"minute_growth={g:.6f}, weak_streak={q.sell_checks}/{Y3}",
+                    price=p,
+                    status="BOUGHT",
+                )
+
+                if q.sell_checks >= Y3:
+                    self.e.q(
+                        "WARNING",
+                        s,
+                        "SELL",
+                        f"Confirmed breakdown after {q.sell_checks} consecutive weak minutes",
+                        price=p,
+                        status="SOLD",
+                    )
+                    self.x(q, p, t)
             return
-        if q.status != "QUARANTINED" or t <= q.alert_time:
+
+        if q.status != "QUARANTINED":
             return
+
+        if t <= q.alert_time:
+            return
+
         if not q.times or t > q.times[-1]:
             q.prices.append(p)
             q.times.append(t)
-            if len(q.prices) > 1:
-                rr = math.log(p / q.prices[-2]) if p > 0 and q.prices[-2] > 0 else None
-                self.e.q("INFO", s, "QUARANTINE", f"Minute observation {len(q.prices)-1}/{R}: price={p:.4f}, rate={rr:.6f}" if rr is not None else "Invalid price", price=p, status="QUARANTINED")
-        if len(q.prices) < R + 1:
+            minute_no = len(q.prices) - 1
+
+            self.e.q(
+                "INFO",
+                s,
+                "QUARANTINE",
+                f"Observation {minute_no}/{R}: price={p:.4f}",
+                price=p,
+                status="QUARANTINED",
+            )
+
+        if len(q.prices) < 3:
             return
-        if R != 2:
-            self.w(q, "INVALID_QUARANTINE_SETTING")
-            return
-        a0, a1, a2 = q.prices[0], q.prices[1], q.prices[2]
-        if min(a0, a1, a2) <= 0:
+
+        p0, p1, p2 = q.prices[0], q.prices[1], q.prices[2]
+
+        if min(p0, p1, p2) <= 0:
             self.w(q, "INVALID_PRICE")
             return
-        r1 = math.log(a1 / a0)
-        r2 = math.log(a2 / a1)
-        self.e.q("INFO", s, "QUARANTINE", f"Minute rates r1={r1:.6f}, r2={r2:.6f}, tolerance={U:.2f}", price=p, status="QUARANTINED")
-        if r1 <= 0 or r2 <= 0:
-            self.e.q("WARNING", s, "QUARANTINE", "Failed: momentum not positive in both minutes", price=p, status="IGNORED")
-            self.w(q, "NON_POSITIVE_MOMENTUM")
+
+        r1 = math.log(p1 / p0)
+        r2 = math.log(p2 / p1)
+        total = math.log(p2 / p0)
+        pullback = max(0.0, -r2)
+
+        self.e.q(
+            "INFO",
+            s,
+            "QUARANTINE",
+            f"r1={r1:.6f}, r2={r2:.6f}, total={total:.6f}, pullback={pullback:.6f}",
+            price=p,
+            status="QUARANTINED",
+        )
+
+        if total < Y1:
+            self.e.q(
+                "WARNING",
+                s,
+                "QUARANTINE",
+                f"Failed: two-minute return {total:.6f} < minimum {Y1:.6f}",
+                price=p,
+                status="IGNORED",
+            )
+            self.w(q, "TWO_MIN_RETURN_TOO_LOW")
             return
-        deviation = abs(r2 - r1) / max(abs(r1), 1e-12)
-        if deviation > U:
-            self.e.q("WARNING", s, "QUARANTINE", f"Failed: rate deviation={deviation:.4f} > tolerance={U:.4f}", price=p, status="IGNORED")
-            self.w(q, "RATE_MISMATCH")
+
+        if pullback > Y2:
+            self.e.q(
+                "WARNING",
+                s,
+                "QUARANTINE",
+                f"Failed: minute-2 pullback {pullback:.6f} > maximum {Y2:.6f}",
+                price=p,
+                status="IGNORED",
+            )
+            self.w(q, "SECOND_MINUTE_PULLBACK_TOO_LARGE")
             return
-        self.e.q("WARNING", s, "QUARANTINE", f"Passed: rate deviation={deviation:.4f} <= tolerance={U:.4f}", price=p, status="PASSED")
+
+        self.e.q(
+            "WARNING",
+            s,
+            "QUARANTINE",
+            f"Passed: total={total:.6f}, pullback={pullback:.6f}",
+            price=p,
+            status="PASSED",
+        )
+
         self.t(q, p, t)
 
     def t(self, q, p, t):
