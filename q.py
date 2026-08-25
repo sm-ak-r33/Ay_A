@@ -72,8 +72,6 @@ U = d("QUARANTINE_RATE_TOLERANCE", 0.25)
 Y1 = d("MIN_TWO_MIN_RETURN", 0.005)
 Y2 = d("MAX_QUARANTINE_PULLBACK", 0.0025)
 Y3 = c("SELL_CONFIRM_MINUTES", 2)
-Y4 = d("MAX_SELL_PULLBACK", 0.003)
-V = c("HOLD_MINUTES", 5)
 X = d("BUDGET_DKK", 500)
 Y = d("PENNY_STOCK_USD", 1)
 Z = c("COOLDOWN_MINUTES", 60)
@@ -83,7 +81,7 @@ AC = a("GOOGLE_TRADES_WORKSHEET", "Trades")
 AD = a("GOOGLE_SUMMARY_WORKSHEET", "Summary")
 AJ = a("GOOGLE_DEBUG_WORKSHEET", "Debug")
 AE = a("GOOGLE_EVENT_COLUMNS", "timestamp,symbol,event,price_usd,z_range,z_volume,quarantine_rate_per_min,reason,status")
-AF = a("GOOGLE_TRADE_COLUMNS", "symbol,alert_time,alert_price,buy_time,buy_price,shares,invested_dkk,sell_time,sell_price,pnl_dkk,pnl_pct,status,ignore_reason,latest_price_at_close,close_price_time")
+AF = a("GOOGLE_TRADE_COLUMNS", "trade_id,symbol,alert_time,alert_price,buy_time,buy_price,shares,invested_dkk,sell_time,sell_price,pnl_dkk,pnl_pct,status,exit_reason,peak_price,peak_gain_pct,max_drawdown_pct,latest_price_at_close,close_price_time")
 AG = a("GOOGLE_SUMMARY_COLUMNS", "metric,value")
 AK = a("GOOGLE_DEBUG_COLUMNS", "timestamp,level,symbol,stage,message,price,volume,z_range,z_volume,status")
 AQ = a("GOOGLE_DEBUG_MODE", "signals").lower()
@@ -148,9 +146,11 @@ class A3:
     latest_price: Optional[float] = None
     latest_time: Optional[datetime] = None
     ignore_reason: Optional[str] = None
-    sell_checks: int = 0
-    growths: list[float] = field(default_factory=list)
     alert_volume: float = 0.0
+    peak_price: Optional[float] = None
+    peak_gain_pct: float = 0.0
+    max_drawdown_pct: float = 0.0
+    exit_reason: Optional[str] = None
 
 
 class B1:
@@ -352,11 +352,11 @@ class C1:
         rows = []
         for y in qs.values():
             rows.append([
-                y.symbol, q2(y.alert_time), y.alert_price, q2(y.buy_time), y.buy_price,
-                y.shares, y.invested_dkk, q2(y.sell_time), y.sell_price, y.pnl_dkk,
-                (y.pnl_dkk / y.invested_dkk * 100) if y.invested_dkk else None,
-                y.status, y.ignore_reason, latest.get(y.symbol, (None, None))[0],
-                q2(latest.get(y.symbol, (None, None))[1])
+                f"{y.symbol}-{int(y.alert_time.timestamp())}", y.symbol, q2(y.alert_time), y.alert_price,
+                q2(y.buy_time), y.buy_price, y.shares, y.invested_dkk, q2(y.sell_time), y.sell_price,
+                y.pnl_dkk, (y.pnl_dkk / y.invested_dkk * 100) if y.invested_dkk else None,
+                y.status, y.exit_reason, y.peak_price, y.peak_gain_pct, y.max_drawdown_pct,
+                latest.get(y.symbol, (None, None))[0], q2(latest.get(y.symbol, (None, None))[1])
             ])
         try:
             self.e.clear()
@@ -365,7 +365,7 @@ class C1:
                 self.e.append_rows(rows, value_input_option="USER_ENTERED")
             metrics = [
                 ["budget_dkk", X], ["usd_dkk", self.b], ["penny_floor_usd", Y],
-                ["quarantine_minutes", R], ["rate_tolerance", U], ["hold_minutes", V],
+                ["quarantine_minutes", R], ["rate_tolerance", U], ["min_two_min_return", Y1], ["max_quarantine_pullback", Y2], ["trail_0_10_pct", float(a("TRAIL_0_10_PCT", "4"))], ["trail_10_25_pct", float(a("TRAIL_10_25_PCT", "7"))], ["trail_25_50_pct", float(a("TRAIL_25_50_PCT", "10"))], ["trail_50_plus_pct", float(a("TRAIL_50_PLUS_PCT", "12"))],
                 ["events", len(self.a)], ["tracked_results", len(qs)],
                 ["bought", sum(1 for y in qs.values() if y.shares)],
                 ["closed", sum(1 for y in qs.values() if y.sell_price is not None)],
@@ -494,7 +494,6 @@ class D1:
 
     def s(self, s, p, t):
         q = self.g.get(s)
-
         if q is None:
             return
 
@@ -502,65 +501,41 @@ class D1:
         q.latest_time = t
 
         if q.status == "BOUGHT":
-            if not q.times or t > q.times[-1]:
-                if q.prices and q.prices[-1] > 0 and p > 0:
-                    q.growths.append(math.log(p / q.prices[-1]))
-                q.prices.append(p)
-                q.times.append(t)
+            if q.peak_price is None or p > q.peak_price:
+                q.peak_price = p
+                q.peak_gain_pct = ((p / q.buy_price) - 1.0) * 100.0 if q.buy_price else 0.0
+                self.e.q("INFO", s, "HOLD", f"New peak ${p:.4f}; gain={q.peak_gain_pct:.2f}%", price=p, status="BOUGHT")
 
-            if q.buy_time and t > q.buy_time and q.growths:
-                g = q.growths[-1]
-                if g <= -Y4:
-                    q.sell_checks += 1
-                else:
-                    q.sell_checks = 0
+            if q.peak_price and q.peak_price > 0:
+                drawdown = ((p / q.peak_price) - 1.0) * 100.0
+                if drawdown < q.max_drawdown_pct:
+                    q.max_drawdown_pct = drawdown
+                threshold = self._trail_threshold(q.peak_gain_pct)
 
-                self.e.q(
-                    "INFO",
-                    s,
-                    "HOLD",
-                    f"minute_growth={g:.6f}, weak_streak={q.sell_checks}/{Y3}",
-                    price=p,
-                    status="BOUGHT",
-                )
+                self.e.q("INFO", s, "HOLD", f"peak=${q.peak_price:.4f}; drawdown={drawdown:.2f}%; threshold={threshold:.2f}%", price=p, status="BOUGHT")
 
-                if q.sell_checks >= Y3:
-                    self.e.q(
-                        "WARNING",
-                        s,
-                        "SELL",
-                        f"Confirmed breakdown after {q.sell_checks} consecutive weak minutes",
-                        price=p,
-                        status="SOLD",
-                    )
-                    self.x(q, p, t)
+                if drawdown <= -threshold:
+                    self.x(q, p, t, "ADAPTIVE_TRAILING_STOP")
             return
 
-        if q.status != "QUARANTINED":
-            return
-
-        if t <= q.alert_time:
+        if q.status != "QUARANTINED" or t <= q.alert_time:
             return
 
         if not q.times or t > q.times[-1]:
-            q.prices.append(p)
-            q.times.append(t)
-            minute_no = len(q.prices) - 1
+            if q.prices and q.prices[-1] > 0 and p > 0:
+                q.prices.append(p)
+                q.times.append(t)
+            elif not q.prices:
+                q.prices.append(p)
+                q.times.append(t)
 
-            self.e.q(
-                "INFO",
-                s,
-                "QUARANTINE",
-                f"Observation {minute_no}/{R}: price={p:.4f}",
-                price=p,
-                status="QUARANTINED",
-            )
+            minute_no = len(q.prices) - 1
+            self.e.q("INFO", s, "QUARANTINE", f"Observation {minute_no}/{R}: price={p:.4f}", price=p, status="QUARANTINED")
 
         if len(q.prices) < 3:
             return
 
         p0, p1, p2 = q.prices[0], q.prices[1], q.prices[2]
-
         if min(p0, p1, p2) <= 0:
             self.w(q, "INVALID_PRICE")
             return
@@ -570,49 +545,27 @@ class D1:
         total = math.log(p2 / p0)
         pullback = max(0.0, -r2)
 
-        self.e.q(
-            "INFO",
-            s,
-            "QUARANTINE",
-            f"r1={r1:.6f}, r2={r2:.6f}, total={total:.6f}, pullback={pullback:.6f}",
-            price=p,
-            status="QUARANTINED",
-        )
+        self.e.q("INFO", s, "QUARANTINE", f"r1={r1:.6f}, r2={r2:.6f}, total={total:.6f}, pullback={pullback:.6f}", price=p, status="QUARANTINED")
 
         if total < Y1:
-            self.e.q(
-                "WARNING",
-                s,
-                "QUARANTINE",
-                f"Failed: two-minute return {total:.6f} < minimum {Y1:.6f}",
-                price=p,
-                status="IGNORED",
-            )
             self.w(q, "TWO_MIN_RETURN_TOO_LOW")
             return
 
         if pullback > Y2:
-            self.e.q(
-                "WARNING",
-                s,
-                "QUARANTINE",
-                f"Failed: minute-2 pullback {pullback:.6f} > maximum {Y2:.6f}",
-                price=p,
-                status="IGNORED",
-            )
             self.w(q, "SECOND_MINUTE_PULLBACK_TOO_LARGE")
             return
 
-        self.e.q(
-            "WARNING",
-            s,
-            "QUARANTINE",
-            f"Passed: total={total:.6f}, pullback={pullback:.6f}",
-            price=p,
-            status="PASSED",
-        )
-
+        self.e.q("WARNING", s, "QUARANTINE", f"Passed: total={total:.6f}, pullback={pullback:.6f}", price=p, status="PASSED")
         self.t(q, p, t)
+
+    def _trail_threshold(self, peak_gain_pct):
+        if peak_gain_pct < 10:
+            return float(a("TRAIL_0_10_PCT", "4"))
+        if peak_gain_pct < 25:
+            return float(a("TRAIL_10_25_PCT", "7"))
+        if peak_gain_pct < 50:
+            return float(a("TRAIL_25_50_PCT", "10"))
+        return float(a("TRAIL_50_PLUS_PCT", "12"))
 
     def t(self, q, p, t):
         if p < Y:
@@ -628,23 +581,28 @@ class D1:
         q.buy_price = p
         q.shares = n
         q.invested_dkk = cost
+        q.peak_price = p
+        q.peak_gain_pct = 0.0
+        q.max_drawdown_pct = 0.0
+        q.exit_reason = None
         self.m += 1
         self.e.i([t.isoformat(), q.symbol, "B", p, q.z_range, q.z_volume, None, "QUARANTINE_PASS", "BOUGHT"])
-        self.e.k([q.symbol, q2(q.alert_time), q.alert_price, q2(q.buy_time), q.buy_price, q.shares, q.invested_dkk, None, None, None, None, "BOUGHT", None, p, q2(t)])
+        self.e.k([f"{q.symbol}-{int(q.alert_time.timestamp())}", q.symbol, q2(q.alert_time), q.alert_price, q2(q.buy_time), q.buy_price, q.shares, q.invested_dkk, None, None, None, None, "BOUGHT", None, q.peak_price, q.peak_gain_pct, q.max_drawdown_pct, p, q2(t)])
         self.d.q(f"BUY\n{q.symbol}\nshares: {n}\nprice: ${p:.4f}\ncost: DKK {cost:.2f}\nvolume: {q.alert_volume:.0f}")
         self.e.q("WARNING", q.symbol, "BUY", f"Bought {n} shares @ ${p:.4f}, invested DKK {cost:.2f}, volume={q.alert_volume:.0f}", price=p, volume=q.alert_volume, z_range=q.z_range, z_volume=q.z_volume, status="BOUGHT")
 
-    def x(self, q, p, t):
+    def x(self, q, p, t, exit_reason="UNKNOWN"):
         q.status = "SOLD"
         q.sell_time = t
         q.sell_price = p
         q.latest_price = p
         q.latest_time = t
         q.pnl_dkk = q.shares * p * self.h - q.invested_dkk
+        q.exit_reason = exit_reason
         pct = q.pnl_dkk / q.invested_dkk * 100 if q.invested_dkk else 0.0
         self.n += 1
         self.e.i([t.isoformat(), q.symbol, "S", p, q.z_range, q.z_volume, None, "HOLD_COMPLETE", "SOLD"])
-        self.e.k([q.symbol, q2(q.alert_time), q.alert_price, q2(q.buy_time), q.buy_price, q.shares, q.invested_dkk, q2(q.sell_time), q.sell_price, q.pnl_dkk, pct, "SOLD", None, p, q2(t)])
+        self.e.k([f"{q.symbol}-{int(q.alert_time.timestamp())}", q.symbol, q2(q.alert_time), q.alert_price, q2(q.buy_time), q.buy_price, q.shares, q.invested_dkk, q2(q.sell_time), q.sell_price, q.pnl_dkk, pct, "SOLD", q.exit_reason, q.peak_price, q.peak_gain_pct, q.max_drawdown_pct, p, q2(t)])
         self.d.q(f"SELL\n{q.symbol}\nprice: ${p:.4f}\nP/L: DKK {q.pnl_dkk:+.2f} ({pct:+.2f}%)")
         self.e.q("WARNING", q.symbol, "SELL", f"Sold @ ${p:.4f}, P/L DKK {q.pnl_dkk:+.2f} ({pct:+.2f}%)", price=p, status="SOLD")
         self.g.pop(q.symbol, None)
