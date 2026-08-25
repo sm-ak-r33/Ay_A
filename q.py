@@ -159,7 +159,9 @@ class B1:
         self.b = Z * 60
 
     def q(self, s):
-        return time.monotonic() - self.a.get(s, 0) < self.b
+        if s not in self.a:
+            return False
+        return time.monotonic() - self.a[s] < self.b
 
     def r(self, s):
         self.a[s] = time.monotonic()
