@@ -404,8 +404,20 @@ class D1:
         self.q1 = 0
         self.q2 = 0
         self.qr = 0
-        self.hb = time.monotonic()
-        self.e.q("INFO", "", "CONFIG", f"stream_all={F}; watchlist={len(W)}; candle={I}; stage1_price={J}; stage1_volume={L}; z={M}; baseline={N}; warmup={O}; quarantine={R}; tolerance={U}; hold={V}; budget={X}; penny_floor={Y}")
+        self.hb = time.monotonic()self.e.q(
+            "INFO",
+            "",
+            "CONFIG",
+            f"stream_all={F}; watchlist={len(W)}; candle={I}; "
+            f"stage1_price={J}; stage1_volume={L}; z={M}; "
+            f"baseline={N}; warmup={O}; quarantine={R}; "
+            f"tolerance={U}; budget={X}; penny_floor={Y}; "
+            f"min_two_min_return={Y1}; "
+            f"max_quarantine_pullback={Y2}; "
+            f"trail_0_10={a('TRAIL_0_10_PCT', '4')}; "
+            f"trail_10_25={a('TRAIL_10_25_PCT', '7')}; "
+            f"trail_25_50={a('TRAIL_25_50_PCT', '10')}; "
+            f"trail_50_plus={a('TRAIL_50_PLUS_PCT', '12')}")
 
     def q(self, ss):
         self.e.q("INFO", "", "BOOTSTRAP", f"Starting bootstrap for {len(ss)} symbols")
