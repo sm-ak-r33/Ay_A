@@ -404,7 +404,8 @@ class D1:
         self.q1 = 0
         self.q2 = 0
         self.qr = 0
-        self.hb = time.monotonic()self.e.q(
+        self.hb = time.monotonic()
+        self.e.q(
             "INFO",
             "",
             "CONFIG",
