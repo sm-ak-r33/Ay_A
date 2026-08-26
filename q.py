@@ -75,13 +75,18 @@ Y3 = c("SELL_CONFIRM_MINUTES", 2)
 X = d("BUDGET_DKK", 500)
 Y = d("PENNY_STOCK_USD", 1)
 Z = c("COOLDOWN_MINUTES", 60)
+ATR_PERIOD = c("ATR_PERIOD", 14)
+ATR_MULTIPLIER = d("ATR_MULTIPLIER", 2.0)
+INITIAL_STOP_PCT = d("INITIAL_STOP_PCT", 7.0)
+BREAK_EVEN_TRIGGER_PCT = d("BREAK_EVEN_TRIGGER_PCT", 10.0)
+BREAK_EVEN_BUFFER_PCT = d("BREAK_EVEN_BUFFER_PCT", 0.5)
 AA = a("USD_DKK_RATE", "")
 AB = a("GOOGLE_WORKSHEET", "Events")
 AC = a("GOOGLE_TRADES_WORKSHEET", "Trades")
 AD = a("GOOGLE_SUMMARY_WORKSHEET", "Summary")
 AJ = a("GOOGLE_DEBUG_WORKSHEET", "Debug")
 AE = a("GOOGLE_EVENT_COLUMNS", "timestamp,symbol,event,price_usd,z_range,z_volume,quarantine_rate_per_min,reason,status")
-AF = a("GOOGLE_TRADE_COLUMNS", "trade_id,symbol,alert_time,alert_price,buy_time,buy_price,shares,invested_dkk,sell_time,sell_price,pnl_dkk,pnl_pct,status,exit_reason,peak_price,peak_gain_pct,max_drawdown_pct,latest_price_at_close,close_price_time")
+AF = a("GOOGLE_TRADE_COLUMNS", "trade_id,symbol,alert_time,alert_price,buy_time,buy_price,shares,invested_dkk,sell_time,sell_price,pnl_dkk,pnl_pct,status,exit_reason,peak_price,peak_gain_pct,max_drawdown_pct,atr_at_entry,current_atr,trailing_threshold_pct,stop_price,latest_price_at_close,close_price_time")
 AG = a("GOOGLE_SUMMARY_COLUMNS", "metric,value")
 AK = a("GOOGLE_DEBUG_COLUMNS", "timestamp,level,symbol,stage,message,price,volume,z_range,z_volume,status")
 AQ = a("GOOGLE_DEBUG_MODE", "signals").lower()
@@ -151,6 +156,10 @@ class A3:
     peak_gain_pct: float = 0.0
     max_drawdown_pct: float = 0.0
     exit_reason: Optional[str] = None
+    atr_at_entry: float = 0.0
+    current_atr: float = 0.0
+    stop_price: Optional[float] = None
+    trailing_threshold_pct: float = 0.0
 
 
 class B1:
@@ -159,9 +168,10 @@ class B1:
         self.b = Z * 60
 
     def q(self, s):
-        if s not in self.a:
+        t = self.a.get(s)
+        if t is None:
             return False
-        return time.monotonic() - self.a[s] < self.b
+        return time.monotonic() - t < self.b
 
     def r(self, s):
         self.a[s] = time.monotonic()
@@ -368,6 +378,11 @@ class C1:
             metrics = [
                 ["budget_dkk", X], ["usd_dkk", self.b], ["penny_floor_usd", Y],
                 ["quarantine_minutes", R], ["rate_tolerance", U], ["min_two_min_return", Y1], ["max_quarantine_pullback", Y2], ["trail_0_10_pct", float(a("TRAIL_0_10_PCT", "4"))], ["trail_10_25_pct", float(a("TRAIL_10_25_PCT", "7"))], ["trail_25_50_pct", float(a("TRAIL_25_50_PCT", "10"))], ["trail_50_plus_pct", float(a("TRAIL_50_PLUS_PCT", "12"))],
+                ["atr_period", ATR_PERIOD],
+                ["atr_multiplier", ATR_MULTIPLIER],
+                ["initial_stop_pct", INITIAL_STOP_PCT],
+                ["break_even_trigger_pct", BREAK_EVEN_TRIGGER_PCT],
+                ["break_even_buffer_pct", BREAK_EVEN_BUFFER_PCT],
                 ["events", len(self.a)], ["tracked_results", len(qs)],
                 ["bought", sum(1 for y in qs.values() if y.shares)],
                 ["closed", sum(1 for y in qs.values() if y.sell_price is not None)],
@@ -399,6 +414,8 @@ class D1:
         self.o = 0
         self.p = 0
         self.history = {}
+        self.atr_data = defaultdict(lambda: deque(maxlen=ATR_PERIOD))
+        self._atr_prev_close = {}
         self.qw = 0
         self.qc = 0
         self.qb = 0
@@ -407,20 +424,26 @@ class D1:
         self.q2 = 0
         self.qr = 0
         self.hb = time.monotonic()
-        self.e.q(
-            "INFO",
-            "",
-            "CONFIG",
-            f"stream_all={F}; watchlist={len(W)}; candle={I}; "
-            f"stage1_price={J}; stage1_volume={L}; z={M}; "
-            f"baseline={N}; warmup={O}; quarantine={R}; "
-            f"tolerance={U}; budget={X}; penny_floor={Y}; "
-            f"min_two_min_return={Y1}; "
-            f"max_quarantine_pullback={Y2}; "
-            f"trail_0_10={a('TRAIL_0_10_PCT', '4')}; "
-            f"trail_10_25={a('TRAIL_10_25_PCT', '7')}; "
-            f"trail_25_50={a('TRAIL_25_50_PCT', '10')}; "
-            f"trail_50_plus={a('TRAIL_50_PLUS_PCT', '12')}")
+        self.e.q("INFO", "", "CONFIG", f"stream_all={F}; watchlist={len(W)}; candle={I}; stage1_price={J}; stage1_volume={L}; z={M}; baseline={N}; warmup={O}; quarantine={R}; tolerance={U}; budget={X}; penny_floor={Y}")
+
+    def _tr(self, q, prev_close):
+        if prev_close is None or prev_close <= 0:
+            return q.high - q.low
+        return max(
+            q.high - q.low,
+            abs(q.high - prev_close),
+            abs(q.low - prev_close),
+        )
+
+    def _atr_add(self, q):
+        h = self._atr_prev_close.get(q.symbol)
+        tr = self._tr(q, h)
+        self.atr_data[q.symbol].append(tr)
+        self._atr_prev_close[q.symbol] = q.close
+
+    def _atr(self, s):
+        z = self.atr_data[s]
+        return sum(z) / len(z) if z else 0.0
 
     def q(self, ss):
         self.e.q("INFO", "", "BOOTSTRAP", f"Starting bootstrap for {len(ss)} symbols")
@@ -433,7 +456,9 @@ class D1:
                 count = 0
                 for sy, bb in rr.data.items():
                     for v in bb:
-                        self.a.q(A1(sy, v.timestamp, float(v.open), float(v.high), float(v.low), float(v.close), float(v.volume)))
+                        q0 = A1(sy, v.timestamp, float(v.open), float(v.high), float(v.low), float(v.close), float(v.volume))
+                        self.a.q(q0)
+                        self._atr_add(q0)
                         count += 1
                 self.e.q("INFO", "", "BOOTSTRAP", f"Loaded {count} historical candles for batch {i // P + 1}")
             except Exception as z:
@@ -454,6 +479,7 @@ class D1:
                 self._heartbeat()
                 return
             self.k += 1
+            self._atr_add(y)
             v = self.a.s(s)
             if not self.a.t(s):
                 self.qw += 1
@@ -516,21 +542,66 @@ class D1:
         q.latest_time = t
 
         if q.status == "BOUGHT":
+            atr = self._atr(s)
+            q.current_atr = atr
+
             if q.peak_price is None or p > q.peak_price:
                 q.peak_price = p
                 q.peak_gain_pct = ((p / q.buy_price) - 1.0) * 100.0 if q.buy_price else 0.0
-                self.e.q("INFO", s, "HOLD", f"New peak ${p:.4f}; gain={q.peak_gain_pct:.2f}%", price=p, status="BOUGHT")
 
             if q.peak_price and q.peak_price > 0:
-                drawdown = ((p / q.peak_price) - 1.0) * 100.0
-                if drawdown < q.max_drawdown_pct:
-                    q.max_drawdown_pct = drawdown
-                threshold = self._trail_threshold(q.peak_gain_pct)
+                drawdown_pct = ((p / q.peak_price) - 1.0) * 100.0
+                if drawdown_pct < q.max_drawdown_pct:
+                    q.max_drawdown_pct = drawdown_pct
 
-                self.e.q("INFO", s, "HOLD", f"peak=${q.peak_price:.4f}; drawdown={drawdown:.2f}%; threshold={threshold:.2f}%", price=p, status="BOUGHT")
+                pct_threshold = self._trail_threshold(q.peak_gain_pct)
+                percent_distance = q.peak_price * (pct_threshold / 100.0)
+                atr_distance = atr * ATR_MULTIPLIER
+                distance = max(percent_distance, atr_distance)
 
-                if drawdown <= -threshold:
-                    self.x(q, p, t, "ADAPTIVE_TRAILING_STOP")
+                stop_price = q.peak_price - distance
+
+                if q.peak_gain_pct >= BREAK_EVEN_TRIGGER_PCT and q.buy_price:
+                    be_price = q.buy_price * (1.0 + BREAK_EVEN_BUFFER_PCT / 100.0)
+                    stop_price = max(stop_price, be_price)
+
+                q.trailing_threshold_pct = (
+                    (distance / q.peak_price) * 100.0
+                    if q.peak_price
+                    else pct_threshold
+                )
+                q.stop_price = stop_price
+
+                self.e.q(
+                    "INFO",
+                    s,
+                    "HOLD",
+                    (
+                        f"peak=${q.peak_price:.4f}; "
+                        f"gain={q.peak_gain_pct:.2f}%; "
+                        f"atr=${atr:.4f}; "
+                        f"pct_threshold={pct_threshold:.2f}%; "
+                        f"stop=${stop_price:.4f}; "
+                        f"drawdown={drawdown_pct:.2f}%"
+                    ),
+                    price=p,
+                    status="BOUGHT",
+                )
+
+                if p <= stop_price:
+                    self.e.q(
+                        "WARNING",
+                        s,
+                        "SELL",
+                        (
+                            f"Adaptive ATR stop hit: "
+                            f"price=${p:.4f}; stop=${stop_price:.4f}; "
+                            f"peak=${q.peak_price:.4f}; atr=${atr:.4f}"
+                        ),
+                        price=p,
+                        status="SOLD",
+                    )
+                    self.x(q, p, t, "ATR_ADAPTIVE_TRAILING_STOP")
             return
 
         if q.status != "QUARANTINED" or t <= q.alert_time:
@@ -545,12 +616,20 @@ class D1:
                 q.times.append(t)
 
             minute_no = len(q.prices) - 1
-            self.e.q("INFO", s, "QUARANTINE", f"Observation {minute_no}/{R}: price={p:.4f}", price=p, status="QUARANTINED")
+            self.e.q(
+                "INFO",
+                s,
+                "QUARANTINE",
+                f"Observation {minute_no}/{R}: price={p:.4f}",
+                price=p,
+                status="QUARANTINED",
+            )
 
         if len(q.prices) < 3:
             return
 
         p0, p1, p2 = q.prices[0], q.prices[1], q.prices[2]
+
         if min(p0, p1, p2) <= 0:
             self.w(q, "INVALID_PRICE")
             return
@@ -560,7 +639,17 @@ class D1:
         total = math.log(p2 / p0)
         pullback = max(0.0, -r2)
 
-        self.e.q("INFO", s, "QUARANTINE", f"r1={r1:.6f}, r2={r2:.6f}, total={total:.6f}, pullback={pullback:.6f}", price=p, status="QUARANTINED")
+        self.e.q(
+            "INFO",
+            s,
+            "QUARANTINE",
+            (
+                f"r1={r1:.6f}; r2={r2:.6f}; "
+                f"total={total:.6f}; pullback={pullback:.6f}"
+            ),
+            price=p,
+            status="QUARANTINED",
+        )
 
         if total < Y1:
             self.w(q, "TWO_MIN_RETURN_TOO_LOW")
@@ -570,7 +659,15 @@ class D1:
             self.w(q, "SECOND_MINUTE_PULLBACK_TOO_LARGE")
             return
 
-        self.e.q("WARNING", s, "QUARANTINE", f"Passed: total={total:.6f}, pullback={pullback:.6f}", price=p, status="PASSED")
+        self.e.q(
+            "WARNING",
+            s,
+            "QUARANTINE",
+            f"Passed: total={total:.6f}; pullback={pullback:.6f}",
+            price=p,
+            status="PASSED",
+        )
+
         self.t(q, p, t)
 
     def _trail_threshold(self, peak_gain_pct):
@@ -600,6 +697,15 @@ class D1:
         q.peak_gain_pct = 0.0
         q.max_drawdown_pct = 0.0
         q.exit_reason = None
+        q.atr_at_entry = self._atr(q.symbol)
+        q.current_atr = q.atr_at_entry
+        q.stop_price = p - max(
+            p * INITIAL_STOP_PCT / 100.0,
+            q.current_atr * ATR_MULTIPLIER,
+        )
+        q.trailing_threshold_pct = (
+            ((p - q.stop_price) / p) * 100.0 if p > 0 else INITIAL_STOP_PCT
+        )
         self.m += 1
         self.e.i([t.isoformat(), q.symbol, "B", p, q.z_range, q.z_volume, None, "QUARANTINE_PASS", "BOUGHT"])
         self.e.k([f"{q.symbol}-{int(q.alert_time.timestamp())}", q.symbol, q2(q.alert_time), q.alert_price, q2(q.buy_time), q.buy_price, q.shares, q.invested_dkk, None, None, None, None, "BOUGHT", None, q.peak_price, q.peak_gain_pct, q.max_drawdown_pct, p, q2(t)])
