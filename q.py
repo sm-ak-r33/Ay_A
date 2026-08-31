@@ -800,6 +800,7 @@ class D1:
                         symbol_or_symbols=zz,
                         timeframe=TimeFrame(I, TimeFrameUnit.Minute),
                         start=st,
+                        feed=DataFeed.IEX,
                     )
                 )
                 count = 0
