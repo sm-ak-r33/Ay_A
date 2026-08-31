@@ -841,7 +841,7 @@ class D1:
         self.history = {}
         self.qw = 0
         self.qc = 0
-        self.qb = 0
+        self.qbm = 0
         self.qn = 0
         self.q1 = 0
         self.q2 = 0
@@ -952,7 +952,7 @@ class D1:
                 return
 
             if v is None:
-                self.qb += 1
+                self.qbm += 1
                 self.a.q(y)
                 return
 
