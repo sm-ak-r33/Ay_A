@@ -485,6 +485,266 @@ def q1():
 def q2(x):
     return x.isoformat() if x else None
 
+class C1:
+    def __init__(self):
+        self.b = q1()
+        self.a = []
+        self.z = deque()
+        self.y = deque()
+        self.x = deque()
+        self.q = deque()
+        self.aiq = deque()
+        self.l = threading.Lock()
+        self.m = threading.Event()
+        self.r = 0
+
+        credentials = Credentials.from_service_account_info(
+            json.loads(G),
+            scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        )
+
+        self.c = gspread.authorize(credentials).open_by_key(H)
+
+        self.d = self.g(AB)
+        self.e = self.g(AC)
+        self.f = self.g(AD)
+        self.p = self.g(AJ)
+        self.qw = self.g(AK)
+        self.ai = self.g(AL)
+
+        self.h(self.d, [
+            "timestamp","symbol","event","price_usd","z_range","z_volume",
+            "alert_volume","rate_per_min","reason","status"
+        ])
+        self.h(self.e, [
+            "trade_id","symbol","alert_time","alert_price","buy_time","buy_price",
+            "shares","invested_dkk","sell_time","sell_price","pnl_dkk","pnl_pct",
+            "status","exit_reason","peak_price","peak_gain_pct","max_drawdown_pct",
+            "latest_price_at_close","close_price_time","news_decision","news_hint",
+            "news_window_hours","news_checked_at","news_sources"
+        ])
+        self.h(self.f, ["section","metric","value"])
+        self.h(self.p, [
+            "timestamp","level","symbol","stage","message","price","volume",
+            "z_range","z_volume","status"
+        ])
+        self.h(self.qw, [
+            "trade_id","symbol","alert_time","alert_price","minute_1_time",
+            "minute_1_price","rate_1","minute_2_time","minute_2_price","rate_2",
+            "two_min_return","minute_2_pullback","decision","reason"
+        ])
+        self.h(self.ai, [
+            "timestamp","type","symbol","decision","hint","window_hours",
+            "checked_at","sources"
+        ])
+
+        self.qx("INFO", "", "STARTUP", "Google Sheets connection established")
+
+        threading.Thread(target=self.o, daemon=True).start()
+
+    def g(self, name):
+        try:
+            return self.c.worksheet(name)
+        except gspread.WorksheetNotFound:
+            return self.c.add_worksheet(title=name, rows=1000, cols=30)
+
+    def h(self, w, headers):
+        if not w.get_all_values():
+            w.append_row(headers, value_input_option="USER_ENTERED")
+
+    def qx(self, level, symbol, stage, message, price=None, volume=None, z_range=None, z_volume=None, status=None):
+        row = [
+            datetime.now(timezone.utc).isoformat(),
+            level,
+            symbol,
+            stage,
+            message,
+            price,
+            volume,
+            z_range,
+            z_volume,
+            status,
+        ]
+
+        if level == "ERROR":
+            log.error("[%s] %s %s", stage, symbol or "-", message)
+        elif level == "WARNING":
+            log.warning("[%s] %s %s", stage, symbol or "-", message)
+        else:
+            log.info("[%s] %s %s", stage, symbol or "-", message)
+
+        if AQ == "all" or stage in {
+            "STARTUP","CONFIG","BOOTSTRAP","ANOMALY","QUARANTINE","BUY",
+            "SELL","IGNORE","CLOSE","WEBSOCKET","BAR_HANDLER","BACKGROUND",
+            "HEARTBEAT","NEWS","BRIEF"
+        } or level == "ERROR":
+            with self.l:
+                self.y.append(row)
+
+    def ev(self, row):
+        with self.l:
+            self.z.append(row)
+
+    def tr(self, row):
+        with self.l:
+            self.x.append(row)
+
+    def qu(self, row):
+        with self.l:
+            self.q.append(row)
+
+    def airow(self, row):
+        with self.l:
+            self.aiq = getattr(self, "aiq", deque())
+            self.aiq.append(row)
+
+    def o(self):
+        while not self.m.is_set():
+            self.m.wait(FL)
+            if self.m.is_set():
+                break
+            try:
+                self.f1()
+            except Exception as z:
+                log.error("Google flush error: %s", z)
+
+    def f1(self):
+        with self.l:
+            a1 = [self.y.popleft() for _ in range(min(MX, len(self.y)))]
+            a2 = [self.z.popleft() for _ in range(min(MX, len(self.z)))]
+            a3 = [self.x.popleft() for _ in range(min(MX, len(self.x)))]
+            a4 = [self.q.popleft() for _ in range(min(MX, len(self.q)))]
+            a5 = [self.aiq.popleft() for _ in range(min(MX, len(self.aiq)))]
+
+        try:
+            if a1:
+                self.p.append_rows(a1, value_input_option="USER_ENTERED")
+            if a2:
+                self.d.append_rows(a2, value_input_option="USER_ENTERED")
+            if a3:
+                self.e.append_rows(a3, value_input_option="USER_ENTERED")
+            if a4:
+                self.qw.append_rows(a4, value_input_option="USER_ENTERED")
+            if a5:
+                self.ai.append_rows(a5, value_input_option="USER_ENTERED")
+        except Exception:
+            with self.l:
+                for r in reversed(a1): self.y.appendleft(r)
+                for r in reversed(a2): self.z.appendleft(r)
+                for r in reversed(a3): self.x.appendleft(r)
+                for r in reversed(a4): self.q.appendleft(r)
+                for r in reversed(a5): self.aiq.appendleft(r)
+            raise
+
+    def close(self, qs, latest, counts):
+        self.m.set()
+        try:
+            self.f1()
+        except Exception as z:
+            log.error("Final Google flush error: %s", z)
+
+        try:
+            self.e.clear()
+            self.e.append_row([
+                "trade_id","symbol","alert_time","alert_price","buy_time","buy_price",
+                "shares","invested_dkk","sell_time","sell_price","pnl_dkk","pnl_pct",
+                "status","exit_reason","peak_price","peak_gain_pct","max_drawdown_pct",
+                "latest_price_at_close","close_price_time","news_decision","news_hint",
+                "news_window_hours","news_checked_at","news_sources"
+            ], value_input_option="USER_ENTERED")
+
+            rows = []
+            for y in qs.values():
+                pct = y.pnl_dkk / y.invested_dkk * 100 if y.invested_dkk else None
+                rows.append([
+                    y.trade_id,
+                    y.symbol,
+                    q2(y.alert_time),
+                    y.alert_price,
+                    q2(y.buy_time),
+                    y.buy_price,
+                    y.shares,
+                    y.invested_dkk,
+                    q2(y.sell_time),
+                    y.sell_price,
+                    y.pnl_dkk,
+                    pct,
+                    y.status,
+                    y.ignore_reason,
+                    y.peak_price,
+                    y.peak_gain_pct,
+                    y.max_drawdown_pct,
+                    latest.get(y.symbol, (None,None))[0],
+                    q2(latest.get(y.symbol, (None,None))[1]),
+                    y.news_decision,
+                    y.news_hint,
+                    y.news_window_hours,
+                    q2(y.news_checked_at),
+                    "|".join(y.news_sources),
+                ])
+
+            if rows:
+                self.e.append_rows(rows, value_input_option="USER_ENTERED")
+
+            self.f.clear()
+            self.f.append_row(["section","metric","value"], value_input_option="USER_ENTERED")
+
+            metrics = [
+                ["Signals","candles",counts["candles"]],
+                ["Signals","stage1_pass",counts["stage1"]],
+                ["Signals","stage2_pass",counts["stage2"]],
+                ["Signals","quarantines",counts["quarantine"]],
+                ["Signals","quarantine_pass",counts["qpass"]],
+                ["Signals","quarantine_fail",counts["qfail"]],
+                ["Grok","news_yes",counts["news_yes"]],
+                ["Grok","news_no",counts["news_no"]],
+                ["Trades","buys",counts["buys"]],
+                ["Trades","sells",counts["sells"]],
+                ["Trades","wins",counts["wins"]],
+                ["Trades","losses",counts["losses"]],
+                ["Trades","flat",counts["flat"]],
+                ["Performance","realized_pnl_dkk",counts["pnl"]],
+                ["Performance","win_rate_pct",counts["win_rate"]],
+                ["Strategy","budget_dkk",X],
+                ["Strategy","zscore_threshold",M],
+                ["Strategy","min_two_min_return",Y1],
+                ["Strategy","max_quarantine_pullback",Y2],
+                ["Strategy","trail_0_10_pct",TR0],
+                ["Strategy","trail_10_25_pct",TR1],
+                ["Strategy","trail_25_50_pct",TR2],
+                ["Strategy","trail_50_plus_pct",TR3],
+            ]
+
+            self.f.append_rows(metrics, value_input_option="USER_ENTERED")
+        except Exception as z:
+            log.error("Final Google close error: %s", z)
+
+
+def q1():
+    x = a("USD_DKK_RATE", "")
+    if x:
+        return float(x)
+    try:
+        r = requests.get(
+            "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
+            timeout=10,
+        )
+        r.raise_for_status()
+        import xml.etree.ElementTree as E
+        root = E.fromstring(r.text)
+        d1 = {}
+        for z in root.iter():
+            k = z.attrib.get("currency")
+            v = z.attrib.get("rate")
+            if k and v:
+                d1[k] = float(v)
+        return d1["DKK"] / d1["USD"]
+    except Exception:
+        return float(a("USD_DKK_FALLBACK", "6.5"))
+
+
+def q2(x):
+    return x.isoformat() if x else None
 
 class D1:
     def __init__(self):
