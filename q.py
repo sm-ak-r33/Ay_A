@@ -277,7 +277,7 @@ class B5:
         self.d = {}
         self.e = threading.Lock()
 
-    def _q(self, messages, tools, response_format=None, max_tokens=None):
+    def _q(self, messages, tools=None, max_tokens=16):
         if not self.a or not GE:
             return None
         body = {
@@ -285,13 +285,10 @@ class B5:
             "messages": messages,
             "temperature": 0,
             "reasoning": {"enabled": False},
+            "max_tokens": max_tokens,
         }
         if tools:
             body["tools"] = tools
-        if response_format:
-            body["response_format"] = response_format
-        if max_tokens is not None:
-            body["max_tokens"] = max_tokens
         r = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -306,135 +303,87 @@ class B5:
         r.raise_for_status()
         return r.json()
 
+    def _text(self, data):
+        if not data:
+            return ""
+        return (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+
+    def _sources(self, data):
+        out = []
+        if not data:
+            return out
+        anns = data.get("choices", [{}])[0].get("message", {}).get("annotations", []) or []
+        for x in anns:
+            u = x.get("url_citation", {}).get("url")
+            if u and u not in out:
+                out.append(u)
+        return out
+
     def q(self, q):
         if not self.a or not GE:
             return "NO", "", [], 0, None
 
         now = datetime.now(timezone.utc)
-        key = f"{q.symbol}:{now.date().isoformat()}"
+        key = f"SIGNAL:{q.symbol}:{q.alert_time.date().isoformat()}"
 
         with self.e:
-            if key in self.c:
-                z = self.c[key]
-                if now - z[4] < timedelta(hours=GC):
-                    return z
+            z = self.c.get(key)
+            if z and now - z[4] < timedelta(hours=GC):
+                return z
 
-        dt = q.alert_time.astimezone(NY)
-        hours = GEW if dt.weekday() == 0 else GW
+        local_day = q.alert_time.astimezone(NY)
+        hours = GEW if local_day.weekday() == 0 else GW
         start = q.alert_time - timedelta(hours=hours)
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are a strict market catalyst gate. Search current web news. "
-                    "Return only YES when a credible, material, recent company-specific "
-                    "catalyst plausibly explains the abnormal move. Otherwise return only NO. "
-                    "Do not use general market movement, old articles, unrelated mentions, "
-                    "or unsupported speculation."
+                    "You are a strict market-news catalyst gate. Search the web. "
+                    "Return NO when you cannot find a recent, credible, material, company-specific "
+                    "catalyst plausibly explaining the abnormal move. Return YES only when such a "
+                    "catalyst exists. Output exactly NO or YES|HINT. HINT must be 5 or 6 words. "
+                    "Do not use unrelated, stale, generic market or speculative information."
                 ),
             },
             {
                 "role": "user",
                 "content": (
                     f"Ticker: {q.symbol}\n"
-                    f"Alert UTC: {q.alert_time.astimezone(timezone.utc).isoformat()}\n"
+                    f"Alert UTC: {q.alert_time.isoformat()}\n"
                     f"Price: {q.alert_price:.6f}\n"
-                    f"5-minute z-range: {q.z_range:.3f}\n"
-                    f"5-minute z-volume: {q.z_volume:.3f}\n"
-                    f"Volume: {q.alert_volume:.0f}\n"
-                    f"Search window start: {start.isoformat()}\n"
-                    f"Search window end: {q.alert_time.isoformat()}\n"
-                    "Return exactly YES or NO."
+                    f"5m z-range: {q.z_range:.3f}\n"
+                    f"5m z-volume: {q.z_volume:.3f}\n"
+                    f"5m volume: {q.alert_volume:.0f}\n"
+                    f"Search window: {start.isoformat()} to {q.alert_time.isoformat()}\n"
+                    "Search current web news for this exact company/security and decide."
                 ),
             },
         ]
 
         data = self._q(
             messages,
-            [
-                {
-                    "type": "openrouter:web_search",
-                    "parameters": {
-                        "max_results": max(1, min(GR, 3)),
-                        "max_total_results": max(1, min(GR, 3)),
-                        "search_context_size": "low",
-                    },
-                }
-            ],
-            max_tokens=2,
+            [{
+                "type": "openrouter:web_search",
+                "parameters": {
+                    "max_results": max(1, min(GR, 3)),
+                    "max_total_results": max(1, min(GR, 3)),
+                    "search_context_size": "low",
+                },
+            }],
+            max_tokens=12,
         )
 
-        raw = ""
-        sources = []
-
-        if data:
-            raw = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-                .upper()
-            )
-
-            anns = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("annotations", [])
-                or []
-            )
-
-            for x in anns:
-                u = x.get("url_citation", {}).get("url")
-                if u and u not in sources:
-                    sources.append(u)
-
-        decision = "YES" if raw == "YES" else "NO"
+        raw = self._text(data).upper()
+        sources = self._sources(data)
+        decision = "YES" if raw.startswith("YES|") or raw == "YES" else "NO"
+        hint = raw.split("|", 1)[1].strip() if raw.startswith("YES|") else ""
         checked = datetime.now(timezone.utc)
-        hint = ""
-
-        if decision == "YES":
-            titles = []
-            if data:
-                anns = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("annotations", [])
-                    or []
-                )
-                for x in anns[:GR]:
-                    uc = x.get("url_citation", {})
-                    title = uc.get("title")
-                    content = uc.get("content", "")
-                    if title:
-                        titles.append(f"{title}: {content[:500]}")
-
-            if titles:
-                hdata = self._q(
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Create a factual Telegram hint of exactly 5 or 6 words "
-                                "from the supplied news evidence. No ticker, no punctuation."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": "\n".join(titles),
-                        },
-                    ],
-                    [],
-                    max_tokens=10,
-                )
-                if hdata:
-                    hint = (
-                        hdata.get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                        .strip()
-                    )
-
         result = (decision, hint, sources, hours, checked)
 
         with self.e:
@@ -446,7 +395,8 @@ class B5:
         if not self.a or not GE or not DB:
             return ""
 
-        day = when.astimezone(NY).strftime("%Y-%m-%d")
+        local = when.astimezone(NY)
+        day = local.strftime("%Y-%m-%d")
         key = f"BRIEF:{day}"
 
         with self.e:
@@ -454,343 +404,59 @@ class B5:
                 return self.d[key]
 
         prompt = (
-            f"Today is {day} in New York.\n"
-            "Create a concise pre-market day-trader briefing for U.S. equities.\n"
-            "Use current web information only.\n\n"
-            "1) Earnings: important Nasdaq and NYSE listed companies reporting today.\n"
-            "2) Premarket: fetch https://marketchameleon.com/Reports/PremarketTrading and identify "
-            f"the top {TOPN} notable premarket gainers and top {TOPN} notable premarket losers. "
-            "Give each a 5 or 6 word reason.\n"
-            "3) Biotech: identify companies with Phase 2 or Phase 3 data events today, "
-            "or FDA/PDUFA decisions today.\n"
-            "4) Energy: identify relevant EIA crude inventory, OPEC+, geopolitics, "
-            "and weather catalysts for energy stocks today.\n\n"
-            "Use compact Telegram formatting. Do not invent dates, events, or reasons. "
-            "Prioritize actionable names and omit weak/unverified items."
+            f"Today is {day} in New York. Produce a concise pre-market day-trader briefing.\n"
+            "Use current web sources only.\n"
+            f"1) Earnings: notable Nasdaq and NYSE stocks reporting today.\n"
+            f"2) Premarket: inspect https://marketchameleon.com/Reports/PremarketTrading and list top {TOPN} gainers and top {TOPN} losers with 5-6 word factual reasons.\n"
+            "3) Biotech: Phase 2/Phase 3 data readouts and FDA/PDUFA decisions today.\n"
+            "4) Energy: EIA crude inventories, OPEC+, geopolitics, and weather relevant to energy stocks today.\n"
+            "Omit weak or unverified items. Do not invent catalysts or dates."
         )
 
         data = self._q(
             [
-                {
-                    "role": "system",
-                    "content": "You are a concise pre-market research analyst. Verify facts with current web sources.",
-                },
+                {"role": "system", "content": "You are a concise pre-market financial research analyst. Verify current facts with web sources."},
                 {"role": "user", "content": prompt},
             ],
             [
-                {
-                    "type": "openrouter:web_search",
-                    "parameters": {
-                        "max_results": max(3, min(GR + 1, 5)),
-                        "max_total_results": 18,
-                        "search_context_size": "low",
-                    },
-                },
-                {
-                    "type": "openrouter:web_fetch",
-                    "parameters": {
-                        "max_content_tokens": 5000,
-                    },
-                },
+                {"type": "openrouter:web_search", "parameters": {"max_results": 5, "max_total_results": 20, "search_context_size": "low"}},
+                {"type": "openrouter:web_fetch", "parameters": {"max_content_tokens": 5000}},
             ],
             max_tokens=1200,
         )
-
-        text = ""
-        if data:
-            text = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-            )
+        text = self._text(data)
 
         with self.e:
             self.d[key] = text
-
         return text
 
     def hb(self, rows):
-        if not self.a or not GE:
+        if not self.a or not GE or not rows:
             return ""
 
-        if not rows:
-            return "No ranked movers available."
-
-        payload = "\n".join(
-            f"{i+1}. {x[0]} {x[1]:+.2f}% {x[2]}"
-            for i, x in enumerate(rows)
-        )
-
+        payload = "\n".join(f"{x[0]} {x[1]:+.2f}% {x[2]}" for x in rows)
         data = self._q(
             [
                 {
                     "role": "system",
                     "content": (
-                        "For each listed stock, give exactly a factual 4 or 5 word reason "
-                        "for today's move. Use current web search. Output one line per stock "
-                        "in the form SYMBOL|REASON. Do not add other text."
+                        "Search current web news for each ticker. Return exactly one line per ticker as "
+                        "SYMBOL|REASON. Reason must be factual and 4 or 5 words. No other text."
                     ),
                 },
                 {"role": "user", "content": payload},
             ],
-            [
-                {
-                    "type": "openrouter:web_search",
-                    "parameters": {
-                        "max_results": 1,
-                        "max_total_results": max(5, min(len(rows), 15)),
-                        "search_context_size": "low",
-                    },
-                }
-            ],
+            [{
+                "type": "openrouter:web_search",
+                "parameters": {
+                    "max_results": 1,
+                    "max_total_results": max(1, min(len(rows), 15)),
+                    "search_context_size": "low",
+                },
+            }],
             max_tokens=max(20, len(rows) * 8),
         )
-
-        if not data:
-            return ""
-
-        return (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
-
-
-class C1:
-    def __init__(self):
-        self.b = q1()
-        self.a = []
-        self.z = deque()
-        self.y = deque()
-        self.x = deque()
-        self.q = deque()
-        self.aiq = deque()
-        self.l = threading.Lock()
-        self.m = threading.Event()
-        self.r = 0
-
-        credentials = Credentials.from_service_account_info(
-            json.loads(G),
-            scopes=["https://www.googleapis.com/auth/spreadsheets"],
-        )
-
-        self.c = gspread.authorize(credentials).open_by_key(H)
-
-        self.d = self.g(AB)
-        self.e = self.g(AC)
-        self.f = self.g(AD)
-        self.p = self.g(AJ)
-        self.qw = self.g(AK)
-        self.ai = self.g(AL)
-
-        self.h(self.d, [
-            "timestamp","symbol","event","price_usd","z_range","z_volume",
-            "alert_volume","rate_per_min","reason","status"
-        ])
-        self.h(self.e, [
-            "trade_id","symbol","alert_time","alert_price","buy_time","buy_price",
-            "shares","invested_dkk","sell_time","sell_price","pnl_dkk","pnl_pct",
-            "status","exit_reason","peak_price","peak_gain_pct","max_drawdown_pct",
-            "latest_price_at_close","close_price_time","news_decision","news_hint",
-            "news_window_hours","news_checked_at","news_sources"
-        ])
-        self.h(self.f, ["section","metric","value"])
-        self.h(self.p, [
-            "timestamp","level","symbol","stage","message","price","volume",
-            "z_range","z_volume","status"
-        ])
-        self.h(self.qw, [
-            "trade_id","symbol","alert_time","alert_price","minute_1_time",
-            "minute_1_price","rate_1","minute_2_time","minute_2_price","rate_2",
-            "two_min_return","minute_2_pullback","decision","reason"
-        ])
-        self.h(self.ai, [
-            "timestamp","type","symbol","decision","hint","window_hours",
-            "checked_at","sources"
-        ])
-
-        self.qx("INFO", "", "STARTUP", "Google Sheets connection established")
-
-        threading.Thread(target=self.o, daemon=True).start()
-
-    def g(self, name):
-        try:
-            return self.c.worksheet(name)
-        except gspread.WorksheetNotFound:
-            return self.c.add_worksheet(title=name, rows=1000, cols=30)
-
-    def h(self, w, headers):
-        if not w.get_all_values():
-            w.append_row(headers, value_input_option="USER_ENTERED")
-
-    def qx(self, level, symbol, stage, message, price=None, volume=None, z_range=None, z_volume=None, status=None):
-        row = [
-            datetime.now(timezone.utc).isoformat(),
-            level,
-            symbol,
-            stage,
-            message,
-            price,
-            volume,
-            z_range,
-            z_volume,
-            status,
-        ]
-
-        if level == "ERROR":
-            log.error("[%s] %s %s", stage, symbol or "-", message)
-        elif level == "WARNING":
-            log.warning("[%s] %s %s", stage, symbol or "-", message)
-        else:
-            log.info("[%s] %s %s", stage, symbol or "-", message)
-
-        if AQ == "all" or stage in {
-            "STARTUP","CONFIG","BOOTSTRAP","ANOMALY","QUARANTINE","BUY",
-            "SELL","IGNORE","CLOSE","WEBSOCKET","BAR_HANDLER","BACKGROUND",
-            "HEARTBEAT","NEWS","BRIEF"
-        } or level == "ERROR":
-            with self.l:
-                self.y.append(row)
-
-    def ev(self, row):
-        with self.l:
-            self.z.append(row)
-
-    def tr(self, row):
-        with self.l:
-            self.x.append(row)
-
-    def qu(self, row):
-        with self.l:
-            self.q.append(row)
-
-    def airow(self, row):
-        with self.l:
-            self.aiq = getattr(self, "aiq", deque())
-            self.aiq.append(row)
-
-    def o(self):
-        while not self.m.is_set():
-            self.m.wait(FL)
-            if self.m.is_set():
-                break
-            try:
-                self.f1()
-            except Exception as z:
-                log.error("Google flush error: %s", z)
-
-    def f1(self):
-        with self.l:
-            a1 = [self.y.popleft() for _ in range(min(MX, len(self.y)))]
-            a2 = [self.z.popleft() for _ in range(min(MX, len(self.z)))]
-            a3 = [self.x.popleft() for _ in range(min(MX, len(self.x)))]
-            a4 = [self.q.popleft() for _ in range(min(MX, len(self.q)))]
-            a5 = [self.aiq.popleft() for _ in range(min(MX, len(self.aiq)))]
-
-        try:
-            if a1:
-                self.p.append_rows(a1, value_input_option="USER_ENTERED")
-            if a2:
-                self.d.append_rows(a2, value_input_option="USER_ENTERED")
-            if a3:
-                self.e.append_rows(a3, value_input_option="USER_ENTERED")
-            if a4:
-                self.qw.append_rows(a4, value_input_option="USER_ENTERED")
-            if a5:
-                self.ai.append_rows(a5, value_input_option="USER_ENTERED")
-        except Exception:
-            with self.l:
-                for r in reversed(a1): self.y.appendleft(r)
-                for r in reversed(a2): self.z.appendleft(r)
-                for r in reversed(a3): self.x.appendleft(r)
-                for r in reversed(a4): self.q.appendleft(r)
-                for r in reversed(a5): self.aiq.appendleft(r)
-            raise
-
-    def close(self, qs, latest, counts):
-        self.m.set()
-        try:
-            self.f1()
-        except Exception as z:
-            log.error("Final Google flush error: %s", z)
-
-        try:
-            self.e.clear()
-            self.e.append_row([
-                "trade_id","symbol","alert_time","alert_price","buy_time","buy_price",
-                "shares","invested_dkk","sell_time","sell_price","pnl_dkk","pnl_pct",
-                "status","exit_reason","peak_price","peak_gain_pct","max_drawdown_pct",
-                "latest_price_at_close","close_price_time","news_decision","news_hint",
-                "news_window_hours","news_checked_at","news_sources"
-            ], value_input_option="USER_ENTERED")
-
-            rows = []
-            for y in qs.values():
-                pct = y.pnl_dkk / y.invested_dkk * 100 if y.invested_dkk else None
-                rows.append([
-                    y.trade_id,
-                    y.symbol,
-                    q2(y.alert_time),
-                    y.alert_price,
-                    q2(y.buy_time),
-                    y.buy_price,
-                    y.shares,
-                    y.invested_dkk,
-                    q2(y.sell_time),
-                    y.sell_price,
-                    y.pnl_dkk,
-                    pct,
-                    y.status,
-                    y.ignore_reason,
-                    y.peak_price,
-                    y.peak_gain_pct,
-                    y.max_drawdown_pct,
-                    latest.get(y.symbol, (None,None))[0],
-                    q2(latest.get(y.symbol, (None,None))[1]),
-                    y.news_decision,
-                    y.news_hint,
-                    y.news_window_hours,
-                    q2(y.news_checked_at),
-                    "|".join(y.news_sources),
-                ])
-
-            if rows:
-                self.e.append_rows(rows, value_input_option="USER_ENTERED")
-
-            self.f.clear()
-            self.f.append_row(["section","metric","value"], value_input_option="USER_ENTERED")
-
-            metrics = [
-                ["Signals","candles",counts["candles"]],
-                ["Signals","stage1_pass",counts["stage1"]],
-                ["Signals","stage2_pass",counts["stage2"]],
-                ["Signals","quarantines",counts["quarantine"]],
-                ["Signals","quarantine_pass",counts["qpass"]],
-                ["Signals","quarantine_fail",counts["qfail"]],
-                ["Grok","news_yes",counts["news_yes"]],
-                ["Grok","news_no",counts["news_no"]],
-                ["Trades","buys",counts["buys"]],
-                ["Trades","sells",counts["sells"]],
-                ["Trades","wins",counts["wins"]],
-                ["Trades","losses",counts["losses"]],
-                ["Trades","flat",counts["flat"]],
-                ["Performance","realized_pnl_dkk",counts["pnl"]],
-                ["Performance","win_rate_pct",counts["win_rate"]],
-                ["Strategy","budget_dkk",X],
-                ["Strategy","zscore_threshold",M],
-                ["Strategy","min_two_min_return",Y1],
-                ["Strategy","max_quarantine_pullback",Y2],
-                ["Strategy","trail_0_10_pct",TR0],
-                ["Strategy","trail_10_25_pct",TR1],
-                ["Strategy","trail_25_50_pct",TR2],
-                ["Strategy","trail_50_plus_pct",TR3],
-            ]
-
-            self.f.append_rows(metrics, value_input_option="USER_ENTERED")
-        except Exception as z:
-            log.error("Final Google close error: %s", z)
+        return self._text(data)
 
 
 def q1():
@@ -856,6 +522,9 @@ class D1:
         self.premarket_sent = set()
         self.heartbeat_sent = set()
         self.daily = {}
+        self.first_minute = {}
+        self.week_open = {}
+        self.month_open = {}
         self.rank_dates = []
         self.e.qx("INFO", "", "CONFIG", f"stream_all={F}; watchlist={len(W)}; candle={I}; stage1_price={J}; stage1_volume={L}; z={M}; baseline={N}; warmup={O}; quarantine={R}; tolerance={U}; min_two_min_return={Y1}; max_quarantine_pullback={Y2}; budget={X}; penny_floor={Y}; trails={TR0}/{TR1}/{TR2}/{TR3}; grok={GE}; model={GM}; brief={DB}; heartbeat={HB}")
 
@@ -886,9 +555,10 @@ class D1:
         self.e.qx("INFO", "", "BOOTSTRAP", "Bootstrap completed")
 
     def qb(self, ss):
-        self.e.qx("INFO", "", "RANK_BOOTSTRAP", f"Starting daily rank bootstrap for {len(ss)} symbols")
+        self.e.qx("INFO", "", "RANK_BOOTSTRAP", f"Starting ranking bootstrap for {len(ss)} symbols")
         cl = StockHistoricalDataClient(K, S)
-        st = datetime.now(timezone.utc) - timedelta(days=RB)
+        now = datetime.now(NY)
+        start = now - timedelta(days=RB)
         for i in range(0, len(ss), RR):
             zz = ss[i:i + RR]
             try:
@@ -896,19 +566,61 @@ class D1:
                     StockBarsRequest(
                         symbol_or_symbols=zz,
                         timeframe=TimeFrame(1, TimeFrameUnit.Day),
-                        start=st,
+                        start=start.astimezone(timezone.utc),
+                        end=datetime.now(timezone.utc),
                     )
                 )
                 for sy, bb in rr.data.items():
                     self.daily.setdefault(sy, {})
                     for v in bb:
-                        day = v.timestamp.astimezone(timezone.utc).date()
-                        self.daily[sy][day] = float(v.close)
+                        day = v.timestamp.astimezone(NY).date()
+                        self.daily[sy][day] = {"open": float(v.open), "close": float(v.close)}
             except Exception as z:
                 self.e.qx("ERROR", "", "RANK_BOOTSTRAP", str(z))
             time.sleep(RP)
+        self.e.qx("INFO", "", "RANK_BOOTSTRAP", "Ranking bootstrap completed")
+        self._capture_current_open(ss)
 
-        self.e.qx("INFO", "", "RANK_BOOTSTRAP", "Daily rank bootstrap completed")
+    def _capture_current_open(self, ss):
+        now = datetime.now(NY)
+        today = now.date()
+        session_open_local = datetime(today.year, today.month, today.day, 9, 30, tzinfo=NY)
+        end_local = min(now, session_open_local + timedelta(minutes=5))
+        if now.weekday() >= 5 or now < session_open_local:
+            return
+        cl = StockHistoricalDataClient(K, S)
+        for i in range(0, len(ss), RR):
+            zz = ss[i:i + RR]
+            try:
+                rr = cl.get_stock_bars(
+                    StockBarsRequest(
+                        symbol_or_symbols=zz,
+                        timeframe=TimeFrame(1, TimeFrameUnit.Minute),
+                        start=session_open_local.astimezone(timezone.utc),
+                        end=end_local.astimezone(timezone.utc),
+                    )
+                )
+                for sy, bb in rr.data.items():
+                    if bb:
+                        first = min(bb, key=lambda v: v.timestamp)
+                        self.first_minute[sy] = (float(first.close), first.timestamp.astimezone(NY))
+            except Exception as z:
+                self.e.qx("ERROR", "", "RANK_OPEN", str(z))
+            time.sleep(RP)
+
+    def _set_open_baselines(self, symbol, price, local_t):
+        day = local_t.date()
+        week_start = day - timedelta(days=day.weekday())
+        month_start = day.replace(day=1)
+        self.daily.setdefault(symbol, {})
+        if day not in self.daily[symbol]:
+            self.daily[symbol][day] = {"open": price, "close": price}
+        if local_t.hour == 9 and local_t.minute == 30:
+            self.first_minute.setdefault(symbol, (price, local_t))
+        if day == week_start and local_t.hour == 9 and local_t.minute == 30:
+            self.week_open.setdefault(symbol, (price, local_t))
+        if day == month_start and local_t.hour == 9 and local_t.minute == 30:
+            self.month_open.setdefault(symbol, (price, local_t))
 
     def _trail(self, gain):
         if gain < 10:
@@ -925,8 +637,22 @@ class D1:
             s = z.symbol
             p = float(z.close)
             t = z.timestamp.astimezone(timezone.utc)
+            local_t = t.astimezone(NY)
 
             self.f[s] = (p, t)
+
+            if local_t.weekday() < 5 and local_t.hour == 9 and local_t.minute == 30:
+                if s not in self.first_minute:
+                    self.first_minute[s] = (p, local_t)
+                    self.e.qx("INFO", s, "RANK_OPEN", f"Captured first trading-minute close ${p:.4f}", price=p)
+                day = local_t.date()
+                if local_t.hour == 9 and local_t.minute == 30:
+                    self.daily.setdefault(s, {})
+                    self.daily[s][day] = {"open": p, "close": p}
+                    if day.weekday() == 0 and s not in self.week_open:
+                        self.week_open[s] = (p, local_t)
+                    if day.day == 1 and s not in self.month_open:
+                        self.month_open[s] = (p, local_t)
             self.s(s, p, t)
 
             y = self.b.q(z)
@@ -1271,41 +997,44 @@ class D1:
         )
 
     def ranks(self):
-        rows = []
         now = datetime.now(NY)
         today = now.date()
-        keys = sorted(self.f.keys())
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
+        rows = []
 
-        for s in keys:
-            p, ts = self.f[s]
+        for s in self.f:
+            current, _ = self.f[s]
+            if not current or current <= 0:
+                continue
+
+            daily_base = self.first_minute.get(s, (None, None))[0]
+            week_base = self.week_open.get(s, (None, None))[0]
+            month_base = self.month_open.get(s, (None, None))[0]
+
             hist = self.daily.get(s, {})
-            if not hist:
-                continue
+            if week_base is None:
+                days = sorted(d for d in hist if week_start <= d <= today)
+                if days:
+                    week_base = hist[days[0]]["open"]
+            if month_base is None:
+                days = sorted(d for d in hist if month_start <= d <= today)
+                if days:
+                    month_base = hist[days[0]]["open"]
 
-            days = sorted(hist.keys())
-            prev = [x for x in days if x < today]
-            if not prev:
-                continue
+            daily_ret = ((current / daily_base) - 1) * 100 if daily_base and daily_base > 0 else None
+            weekly_ret = ((current / week_base) - 1) * 100 if week_base and week_base > 0 else None
+            monthly_ret = ((current / month_base) - 1) * 100 if month_base and month_base > 0 else None
 
-            d1 = hist[prev[-1]]
-            widx = prev[-5] if len(prev) >= 5 else prev[0]
-            midx = prev[-21] if len(prev) >= 21 else prev[0]
-
-            daily = (p / d1 - 1) * 100 if d1 > 0 else None
-            weekly = (p / hist[widx] - 1) * 100 if hist.get(widx, 0) > 0 else None
-            monthly = (p / hist[midx] - 1) * 100 if hist.get(midx, 0) > 0 else None
-
-            rows.append((s, daily, weekly, monthly))
+            rows.append((s, daily_ret, weekly_ret, monthly_ret))
 
         return rows
 
     def heartbeat(self):
-        now = datetime.now(NY)
         if not HB:
             return
-        if now.weekday() >= 5:
-            return
-        if now.hour < 10 or now.hour > 15 or now.minute != HM:
+        now = datetime.now(NY)
+        if now.weekday() >= 5 or now.hour < 10 or now.hour > 15 or now.minute != HM:
             return
 
         key = now.strftime("%Y-%m-%d-%H")
@@ -1313,45 +1042,40 @@ class D1:
             return
 
         rows = self.ranks()
-        if not rows:
-            return
+        daily = sorted((x for x in rows if x[1] is not None and x[1] > 0), key=lambda x: x[1], reverse=True)[:TOPN]
+        weekly = sorted((x for x in rows if x[2] is not None and x[2] > 0), key=lambda x: x[2], reverse=True)[:TOPN]
+        monthly = sorted((x for x in rows if x[3] is not None and x[3] > 0), key=lambda x: x[3], reverse=True)[:TOPN]
 
-        a1 = sorted([x for x in rows if x[1] is not None], key=lambda x: x[1], reverse=True)[:TOPN]
-        a2 = sorted([x for x in rows if x[2] is not None], key=lambda x: x[2], reverse=True)[:TOPN]
-        a3 = sorted([x for x in rows if x[3] is not None], key=lambda x: x[3], reverse=True)[:TOPN]
-
-        flat = []
-        for label, block, idx in [("D", a1, 1), ("W", a2, 2), ("M", a3, 3)]:
+        selected = []
+        for label, block, idx in [("D", daily, 1), ("W", weekly, 2), ("M", monthly, 3)]:
             for x in block:
-                flat.append((x[0], x[idx], label))
+                selected.append((x[0], x[idx], label))
 
-        if not flat:
-            return
-
-        hints = self.ai.hb(flat)
+        hints = self.ai.hb(selected) if selected else ""
         hm = {}
         for line in hints.splitlines():
             if "|" in line:
                 s, h = line.split("|", 1)
                 hm[s.strip().upper()] = h.strip()
 
-        def fmt(title, block, idx):
+        def block_text(title, block, idx):
             out = [title]
+            if not block:
+                out.append("No positive performers")
             for n, x in enumerate(block, 1):
-                out.append(f"{n}. {x[0]} {x[idx]:+.2f}% — {hm.get(x[0], 'No catalyst confirmed')}")
+                out.append(f"{n}. {x[0]} {x[idx]:+.2f}% — {hm.get(x[0], 'No catalyst found')}")
             return "\n".join(out)
 
         text = (
             "📊 MARKET HEARTBEAT\n\n"
-            + fmt("DAILY", a1, 1)
+            + block_text("DAILY", daily, 1)
             + "\n\n"
-            + fmt("WEEKLY", a2, 2)
+            + block_text("WEEKLY", weekly, 2)
             + "\n\n"
-            + fmt("MONTHLY", a3, 3)
+            + block_text("MONTHLY", monthly, 3)
         )
 
         self.d.q(text)
-
         self.e.qx("INFO", "", "HEARTBEAT", f"Sent hourly heartbeat for {key}")
         self.heartbeat_sent.add(key)
 
@@ -1465,7 +1189,7 @@ def f3():
     s = D1()
     ss = f1() if F else W
 
-    s.e.qx("INFO", "", "STARTUP", "VERSION=4.0-GROK-BRIEF-HEARTBEAT")
+    s.e.qx("INFO", "", "STARTUP", "VERSION=5.0-GROK-RANKING-FIX")
     s.e.qx("INFO", "", "STARTUP", f"Monitoring {len(ss)} symbols")
 
     s.q(ss)
