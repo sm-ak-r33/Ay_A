@@ -97,7 +97,7 @@ RT = c("GOOGLE_RETRY_SECONDS", 60)
 MX = c("GOOGLE_MAX_ROWS_PER_FLUSH", 500)
 
 GE = b("GROK_ENABLED", True)
-GM = a("GROK_MODEL", "x-ai/grok-4.20")
+GM = a("GROK_MODEL", "inclusionai/ling-3.0-flash-fin:free")
 GR = c("GROK_MAX_RESULTS", 2)
 GC = c("GROK_CACHE_HOURS", 24)
 GT = c("GROK_TIMEOUT_SECONDS", 25)
