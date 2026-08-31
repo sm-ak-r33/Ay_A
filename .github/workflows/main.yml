@@ -11,34 +11,54 @@ jobs:
     timeout-minutes: 360
 
     env:
-      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
-      STREAM_ALL: ${{ secrets.STREAM_ALL }}
-      WATCHLIST: ${{ secrets.WATCHLIST }}
-      CANDLE_INTERVAL: ${{ secrets.CANDLE_INTERVAL }}
-      STAGE1_PRICE_MULT: ${{ secrets.STAGE1_PRICE_MULT }}
-      STAGE1_VOLUME_MULT: ${{ secrets.STAGE1_VOLUME_MULT }}
-      ZSCORE_THRESHOLD: ${{ secrets.ZSCORE_THRESHOLD }}
-      BASELINE_CANDLES: ${{ secrets.BASELINE_CANDLES }}
-      WARMUP_MIN_CANDLES: ${{ secrets.WARMUP_MIN_CANDLES }}
-      BOOTSTRAP_BATCH: ${{ secrets.BOOTSTRAP_BATCH }}
-      BOOTSTRAP_PAUSE: ${{ secrets.BOOTSTRAP_PAUSE }}
-      QUARANTINE_MINUTES: ${{ secrets.QUARANTINE_MINUTES }}
-      QUARANTINE_RATE_TOLERANCE: ${{ secrets.QUARANTINE_RATE_TOLERANCE }}
-      HOLD_MINUTES: ${{ secrets.HOLD_MINUTES }}
-      BUDGET_DKK: ${{ secrets.BUDGET_DKK }}
-      PENNY_STOCK_USD: ${{ secrets.PENNY_STOCK_USD }}
-      COOLDOWN_MINUTES: ${{ secrets.COOLDOWN_MINUTES }}
-      USD_DKK_RATE: ${{ secrets.USD_DKK_RATE }}
-
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-      GOOGLE_WORKSHEET: ${{ secrets.GOOGLE_WORKSHEET }}
-      GOOGLE_TRADES_WORKSHEET: ${{ secrets.GOOGLE_TRADES_WORKSHEET }}
-      GOOGLE_SUMMARY_WORKSHEET: ${{ secrets.GOOGLE_SUMMARY_WORKSHEET }}
+        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+    
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    
+        GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+    
+        OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    
+        STREAM_ALL: ${{ secrets.STREAM_ALL }}
+        WATCHLIST: ${{ secrets.WATCHLIST }}
+        CANDLE_INTERVAL: ${{ secrets.CANDLE_INTERVAL }}
+        STAGE1_PRICE_MULT: ${{ secrets.STAGE1_PRICE_MULT }}
+        STAGE1_VOLUME_MULT: ${{ secrets.STAGE1_VOLUME_MULT }}
+        ZSCORE_THRESHOLD: ${{ secrets.ZSCORE_THRESHOLD }}
+        BASELINE_CANDLES: ${{ secrets.BASELINE_CANDLES }}
+        WARMUP_MIN_CANDLES: ${{ secrets.WARMUP_MIN_CANDLES }}
+    
+        QUARANTINE_MINUTES: ${{ secrets.QUARANTINE_MINUTES }}
+        QUARANTINE_RATE_TOLERANCE: ${{ secrets.QUARANTINE_RATE_TOLERANCE }}
+        MIN_TWO_MIN_RETURN: ${{ secrets.MIN_TWO_MIN_RETURN }}
+        MAX_QUARANTINE_PULLBACK: ${{ secrets.MAX_QUARANTINE_PULLBACK }}
+    
+        BUDGET_DKK: ${{ secrets.BUDGET_DKK }}
+        PENNY_STOCK_USD: ${{ secrets.PENNY_STOCK_USD }}
+    
+        TRAIL_0_10_PCT: ${{ secrets.TRAIL_0_10_PCT }}
+        TRAIL_10_25_PCT: ${{ secrets.TRAIL_10_25_PCT }}
+        TRAIL_25_50_PCT: ${{ secrets.TRAIL_25_50_PCT }}
+        TRAIL_50_PLUS_PCT: ${{ secrets.TRAIL_50_PLUS_PCT }}
+    
+        GROK_ENABLED: ${{ secrets.GROK_ENABLED }}
+        GROK_MODEL: ${{ secrets.GROK_MODEL }}
+        GROK_MAX_RESULTS: ${{ secrets.GROK_MAX_RESULTS }}
+        GROK_CACHE_HOURS: ${{ secrets.GROK_CACHE_HOURS }}
+        GROK_TIMEOUT_SECONDS: ${{ secrets.GROK_TIMEOUT_SECONDS }}
+        GROK_NEWS_WEEKDAY_HOURS: ${{ secrets.GROK_NEWS_WEEKDAY_HOURS }}
+        GROK_NEWS_WEEKEND_HOURS: ${{ secrets.GROK_NEWS_WEEKEND_HOURS }}
+    
+        DAILY_BRIEF_ENABLED: ${{ secrets.DAILY_BRIEF_ENABLED }}
+        BRIEF_HOUR_ET: ${{ secrets.BRIEF_HOUR_ET }}
+        BRIEF_MINUTE_ET: ${{ secrets.BRIEF_MINUTE_ET }}
+    
+        HOURLY_HEARTBEAT_ENABLED: ${{ secrets.HOURLY_HEARTBEAT_ENABLED }}
+        HEARTBEAT_MINUTE_ET: ${{ secrets.HEARTBEAT_MINUTE_ET }}
+        HEARTBEAT_TOP_N: ${{ secrets.HEARTBEAT_TOP_N }}
 
     steps:
       - name: Checkout
