@@ -1379,8 +1379,8 @@ class D1:
                         self.brief()
                         seen_day = now.date()
 
-                    if now.minute == HM and now.hour >= 10 and now.hour <= 15:
-                        key = now.strftime("%Y-%m-%d-%H")
+                    if now.minute % 15 == 0 and now.hour >= 9 and now.hour <= 16:
+                        key = now.strftime("%Y-%m-%d-%H-%M")
                         if key not in seen_hours:
                             self.heartbeat()
                             seen_hours.add(key)
