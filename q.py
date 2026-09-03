@@ -829,6 +829,7 @@ class D1:
                         timeframe=TimeFrame(1, TimeFrameUnit.Day),
                         start=start.astimezone(timezone.utc),
                         end=datetime.now(timezone.utc),
+                        feed=DataFeed.IEX,
                     )
                 )
                 for sy, bb in rr.data.items():
