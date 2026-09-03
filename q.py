@@ -422,7 +422,7 @@ class B5:
                 {"type": "openrouter:web_search", "parameters": {"max_results": 5, "max_total_results": 20, "search_context_size": "low"}},
                 {"type": "openrouter:web_fetch", "parameters": {"max_content_tokens": 5000}},
             ],
-            max_tokens=1200,
+            max_tokens=800,
         )
         text = self._text(data)
 
