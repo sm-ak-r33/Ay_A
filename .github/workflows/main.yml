@@ -26,6 +26,8 @@ jobs:
       K06: ${{ secrets.K06 }}
       K07: ${{ secrets.K07 }}
       K08: ${{ secrets.K08 }}
+      GOOGLE_SCRIPT_URL: ${{ secrets.GOOGLE_SCRIPT_URL }}
+      GOOGLE_SCRIPT_SECRET: ${{ secrets.GOOGLE_SCRIPT_SECRET }}
 
     steps:
       - name: Checkout
