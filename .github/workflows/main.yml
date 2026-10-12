@@ -47,7 +47,10 @@ jobs:
       - name: Syntax check
         run: python -m py_compile q.py
         
-      - name: Google Check
+      - name: Config Check
+        run: python q.py --check-config
+
+      - name: Google Check 
         run: python q.py --check-google
         
       # - name: Self test
